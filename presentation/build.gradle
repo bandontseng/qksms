@@ -69,8 +69,8 @@ android {
         noAnalytics { dimension "analytics" }
     }
 
-    viewBinding {
-        enabled = true
+    buildFeatures {
+        viewBinding true
     }
 
     if (System.getenv("CI") == "true") {
