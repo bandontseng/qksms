@@ -160,6 +160,7 @@ class MainViewModel @Inject constructor(
                 .autoDisposable(view.scope())
                 .subscribe { intent ->
                     when (intent.getStringExtra("screen")) {
+                        "compose" -> navigator.showConversation(intent.getLongExtra("threadId", 0))
                         "blocking" -> navigator.showBlockedConversations()
                     }
                 }
@@ -194,6 +195,8 @@ class MainViewModel @Inject constructor(
                     query
                 }
                 .filter { query -> query.length >= 2 }
+                .map { query -> query.trim() }
+                .distinctUntilChanged()
                 .doOnNext {
                     newState {
                         val page = (page as? Searching) ?: Searching()
