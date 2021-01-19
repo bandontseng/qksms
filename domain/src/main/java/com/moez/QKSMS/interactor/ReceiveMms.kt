@@ -23,6 +23,7 @@ import com.moez.QKSMS.blocking.BlockingClient
 import com.moez.QKSMS.extensions.mapNotNull
 import com.moez.QKSMS.manager.ActiveConversationManager
 import com.moez.QKSMS.manager.NotificationManager
+import com.moez.QKSMS.repository.ContactRepository
 import com.moez.QKSMS.repository.ConversationRepository
 import com.moez.QKSMS.repository.MessageRepository
 import com.moez.QKSMS.repository.SyncRepository
@@ -39,7 +40,8 @@ class ReceiveMms @Inject constructor(
     private val syncManager: SyncRepository,
     private val messageRepo: MessageRepository,
     private val notificationManager: NotificationManager,
-    private val updateBadge: UpdateBadge
+    private val updateBadge: UpdateBadge,
+    private val contactRepository: ContactRepository
 ) : Interactor<Uri>() {
 
     override fun buildObservable(params: Uri): Flowable<*> {
@@ -66,6 +68,8 @@ class ReceiveMms @Inject constructor(
                         return@mapNotNull null
                     }
 
+                    var checkMsg = conversationRepo.getConversation(message.threadId)
+
                     when (action) {
                         is BlockingClient.Action.Block -> {
                             messageRepo.markRead(message.threadId)
@@ -75,18 +79,51 @@ class ReceiveMms @Inject constructor(
                         else -> Unit
                     }
 
+                    checkMsg = conversationRepo.getConversation(message.threadId)
+
                     message
                 }
                 .doOnNext { message ->
                     conversationRepo.updateConversations(message.threadId) // Update the conversation
                 }
                 .mapNotNull { message ->
+                    // This block will create new conversation from conversation repo.
+                    // So we have to check whether the address is in contact list.
+                    val queryResult = contactRepository.findContactUri(message.address)
+                    var inContactsRepo: Boolean = false
+                    try {
+                        val uri = queryResult.blockingGet()
+                        inContactsRepo = true;
+                    } catch (ex: java.util.NoSuchElementException) {
+
+                    }
+
+                    // This is different from ReceiveSms.
+                    // The MMS conversation will be added into conversation repo in the very beginning.
+                    // So, we can check the message length.
+                    // If there is only one message in the repo, this is the first message of the conversation.
+                    // Otherwise, if the size of message of this threadId is more than 1, this is NOT a new
+                    // conversation.
+                    val checkMsgs = messageRepo.getLastIncomingMessage(message.threadId)
+
+                    if(!inContactsRepo && checkMsgs.size == 1) {
+                        // The address does not exist in contact list and this is a new conversation.
+                        Timber.d("this conversation will be archived")
+
+                        // Because we cannot modify the message directly which will cause Exception.
+                        // We create the conversation and then mark it as archived.
+                        // Before return the message, we get the message again - the new message object will contain the latest archived state.
+                        val tempMsg = conversationRepo.getOrCreateConversation(message.threadId)
+                        conversationRepo.markArchived(message.threadId)
+                    }
+
                     conversationRepo.getOrCreateConversation(message.threadId) // Map message to conversation
                 }
-                .filter { conversation -> !conversation.blocked } // Don't notify for blocked conversations
+                .filter { conversation -> !conversation.blocked && !conversation.archived } // Don't notify for blocked conversations
                 .doOnNext { conversation ->
+                    Timber.d("test before check archived")
                     // Unarchive conversation if necessary
-                    if (conversation.archived) conversationRepo.markUnarchived(conversation.id)
+                    // if (conversation.archived) conversationRepo.markUnarchived(conversation.id)
                 }
                 .map { conversation -> conversation.id } // Map to the id because [delay] will put us on the wrong thread
                 .doOnNext(notificationManager::update) // Update the notification

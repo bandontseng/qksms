@@ -56,20 +56,6 @@ class ReceiveSms @Inject constructor(
                     val action = blockingClient.getAction(address).blockingGet()
                     val shouldDrop = prefs.drop.get()
 
-                    /*
-                    val queryResult = contactRepository.findContactUri(address)
-
-                    var inContactsRepo: Boolean = false
-                    try {
-                        val uri = queryResult.blockingGet()
-                        inContactsRepo = true;
-                        Timber.v("uri=$uri")
-                    } catch (ex: java.util.NoSuchElementException) {
-
-                    }
-                    Timber.v("address=$address queryResult=$inContactsRepo")
-                    */
-
                     // If we should drop the message, don't even save it
                     if (action is BlockingClient.Action.Block && shouldDrop) {
                         return@mapNotNull null
@@ -92,26 +78,12 @@ class ReceiveSms @Inject constructor(
                         else -> Unit
                     }
 
-                    /*
-                    if (!inContactsRepo) {
-                        Timber.v("markedArchived")
-                        conversationRepo.markArchived(message.threadId)
-                    }
-                    */
-
-                    Timber.v("message1 = $message")
-
                     message
                 }
                 .doOnNext { message ->
-                    Timber.v("message2 = $message")
-                    val msg = conversationRepo.updateConversations(message.threadId) // Update the conversation
-                    Timber.v("message2 = $msg")
-                    msg
+                    conversationRepo.updateConversations(message.threadId) // Update the conversation
                 }
                 .mapNotNull { message ->
-                    Timber.v("message3 = " + message.address.toString())
-
                     // This block will create new conversation from conversation repo.
                     // So we have to check whether the address is in contact list.
                     val queryResult = contactRepository.findContactUri(message.address)
@@ -130,12 +102,9 @@ class ReceiveSms @Inject constructor(
                     // and get update notification.
                     val checkMsg = conversationRepo.getConversation(message.threadId)
 
-                    Timber.v("message 3 " + checkMsg?.toString())
-
                     if(!inContactsRepo && checkMsg == null) {
                         // The address does not exist in conact list and this is a new conversation.
-                        Timber.v("message3 markArchived")
-
+                        Timber.d("this conversation will be archived")
                         // Because we cannot modify the message directly which will cause Exception.
                         // We create the conversation and then mark it as archived.
                         // Before return the message, we get the message again - the new message object will contain the latest archived state.
@@ -145,26 +114,15 @@ class ReceiveSms @Inject constructor(
 
                     val msg = conversationRepo.getOrCreateConversation(message.threadId)
 
-                    Timber.v("message3 = " + msg?.archived)
                     msg
                 }
-                .filter { conversation ->
-                    Timber.v("conversation1 = $conversation")
-                    if(conversation.archived) {
-                        Timber.v("conversation1 archived")
-                    }
-                    else {
-                        Timber.v("conversation1 NOT archived")
-                    }
-                    !conversation.blocked && !conversation.archived
-                } // Don't notify for blocked conversations
+                .filter { conversation -> !conversation.blocked && !conversation.archived } // Don't notify for blocked conversations
                 .doOnNext { conversation ->
-                    Timber.v("test before check archived")
+                    Timber.d("test before check archived")
                     // Unarchive conversation if necessary
                     // if (conversation.archived) conversationRepo.markUnarchived(conversation.id)
                 }
                 .map { conversation ->
-                    Timber.v("conversation3 = $conversation")
                     conversation.id
                 } // Map to the id because [delay] will put us on the wrong thread
                 .doOnNext { threadId -> notificationManager.update(threadId) } // Update the notification
